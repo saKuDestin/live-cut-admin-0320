@@ -184,5 +184,11 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    proxy: {
+      "/api/admin": {
+        target: "http://localhost:3002",
+        changeOrigin: true,
+      },
+    },
   },
 });
