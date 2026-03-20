@@ -120,20 +120,20 @@ async function startServer() {
     next();
   });
 
-  // ==================== 静态文件服务（双路径分发）====================
+  // ==================== 静态路径解析（双路径分发）====================
   //
-  // 路由策略：
-  //   /          → dist/client  （前台客户端）
-  //   /admin     → dist/admin   （后台管理端）
-  //   /api/admin → API 路由（不走静态文件）
+  // 路由优先级（从高到低）：
+  //   1. /api/*      → API 路由（最高优先级，在下方注册）
+  //   2. 静态文件    → dist/admin 和 dist/client
+  //   3. SPA fallback → 返回对应 index.html
   //
   // 路径探测辅助函数：优先用 process.cwd()，兜底用 __dirname
   function resolveDistPath(subDir: string): string {
     const candidates = [
-      path.join(process.cwd(), "dist", subDir),          // 最可靠：cwd 始终是项目根
-      path.join(__dirname, subDir),                       // esbuild 打包后：__dirname=dist
-      path.join(__dirname, "..", "dist", subDir),        // tsx 运行：__dirname=server
-      path.join(__dirname, "..", "..", "dist", subDir), // 其他层级尝试
+      path.join(process.cwd(), "dist", subDir),
+      path.join(__dirname, subDir),
+      path.join(__dirname, "..", "dist", subDir),
+      path.join(__dirname, "..", "..", "dist", subDir),
     ];
     return candidates.find(p => fs.existsSync(p)) || candidates[0];
   }
@@ -141,7 +141,6 @@ async function startServer() {
   const adminStaticPath = resolveDistPath("admin");
   const clientStaticPath = resolveDistPath("client");
 
-  // 输出完整绝对路径，方便 Render 日志排查
   console.log(`[DEBUG] ====== 静态文件服务启动（双路径分发）======`);
   console.log(`[DEBUG] NODE_ENV          = ${process.env.NODE_ENV}`);
   console.log(`[DEBUG] __dirname         = ${__dirname}`);
@@ -151,7 +150,6 @@ async function startServer() {
 
   if (!fs.existsSync(adminStaticPath)) {
     console.error(`[DEBUG] ❌ Admin build NOT found: ${adminStaticPath}`);
-    console.error(`[DEBUG]    → Build Command 应为: pnpm install && pnpm build`);
   } else {
     console.log(`[DEBUG] ✅ Admin static: ${adminStaticPath}`);
   }
@@ -161,12 +159,9 @@ async function startServer() {
     console.log(`[DEBUG] ✅ Client static: ${clientStaticPath}`);
   }
 
-  // 后台管理端静态资源：/admin/assets/* 等
-  // 必须在 API 路由之前注册，防止被全捕获路由拦截
-  app.use("/admin", express.static(adminStaticPath, { maxAge: "1d" }));
-
-  // 前台客户端静态资源：/assets/* 等（根路径下）
-  app.use("/", express.static(clientStaticPath, { maxAge: "1d" }));
+  // ==================== API 路由（最高优先级，必须在静态文件之前）====================
+  // 注意：所有 app.use('/api', ...) 和 app.post('/api/...') 均在此块之后注册
+  // 静态文件服务在所有 API 路由注册完毕后再挂载（见文件末尾 SPA Fallback 之前）
 
   // ==================== 认证接口 ====================
 
@@ -177,11 +172,12 @@ async function startServer() {
       if (!username || !password) { res.status(400).json({ error: "请输入用户名和密码" }); return; }
       const db = getPool();
       const [rows] = await db.execute<mysql.RowDataPacket[]>(
-        "SELECT id, username, name, role, passwordHash FROM users WHERE username = ? AND role = 'admin'",
+        "SELECT id, username, name, role, passwordHash, isActive FROM users WHERE username = ? AND role = 'admin'",
         [username.trim()]
       );
       const user = rows[0];
       if (!user || !user.passwordHash) { res.status(401).json({ error: "用户名或密码错误" }); return; }
+      if (!user.isActive) { res.status(403).json({ error: "账号已被禁用，请联系管理员" }); return; }
       const valid = await bcrypt.compare(password, user.passwordHash);
       if (!valid) { res.status(401).json({ error: "用户名或密码错误" }); return; }
       const token = jwt.sign({ userId: user.id, role: user.role, name: user.name }, ADMIN_JWT_SECRET, { expiresIn: "7d" });
@@ -610,6 +606,12 @@ async function startServer() {
       res.status(500).json({ error: err.message || "设置生命周期策略失败" });
     }
   });
+
+  // ==================== 静态文件服务（在所有 API 路由之后注册）====================
+  // 后台管理端静态资源：/admin/assets/* 等
+  app.use("/admin", express.static(adminStaticPath, { maxAge: "1d" }));
+  // 前台客户端静态资源：/assets/* 等（根路径下）
+  app.use("/", express.static(clientStaticPath, { maxAge: "1d" }));
 
   // ==================== SPA Fallback（双路径分发）====================
   //

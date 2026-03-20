@@ -1,8 +1,9 @@
 /*
  * Home.tsx - 前台客户端首页
  * 访问 seealso.online/ 时展示此页面
- * 可根据实际业务需求替换为真实的前台界面
  */
+import { Link } from "wouter";
+
 export default function Home() {
   return (
     <div
@@ -74,7 +75,8 @@ export default function Home() {
             flexWrap: "wrap",
           }}
         >
-          <a
+          {/* 使用 wouter Link 进行前端路由跳转，避免整页刷新 */}
+          <Link
             href="/app"
             style={{
               display: "inline-flex",
@@ -91,7 +93,8 @@ export default function Home() {
             }}
           >
             立即使用
-          </a>
+          </Link>
+          {/* 管理后台使用普通 <a> 标签，触发整页跳转到 /admin */}
           <a
             href="/admin"
             style={{
