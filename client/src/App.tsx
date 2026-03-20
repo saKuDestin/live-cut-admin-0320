@@ -1,11 +1,15 @@
 /*
  * App.tsx - 直播切片大师管理后台
  * Design: 极简主义企业后台 - 深色 GitHub 风格
- * Routes: /login (公开) | / /users /api-config /settings (需登录)
+ * Routes: /admin/login (公开) | /admin /admin/users /admin/api-config /admin/settings (需登录)
+ *
+ * 使用 wouter 的 Router base="/admin" 选项，所有路由路径自动加上 /admin 前缀：
+ *   <Route path="/login"> 实际匹配 /admin/login
+ *   <Route path="/"> 实际匹配 /admin
  */
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Route, Switch, useLocation } from "wouter";
+import { Router, Route, Switch, useLocation } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { useAdminAuth } from "./hooks/useAdminAuth";
@@ -60,17 +64,22 @@ function LoginRoute() {
   return <Login onSuccess={() => navigate("/")} />;
 }
 
-function Router() {
+function AppRouter() {
   return (
-    <Switch>
-      <Route path="/login" component={LoginRoute} />
-      <Route path="/" component={() => <ProtectedRoute component={Dashboard} />} />
-      <Route path="/users" component={() => <ProtectedRoute component={Users} />} />
-      <Route path="/api-config" component={() => <ProtectedRoute component={ApiConfig} />} />
-      <Route path="/r2-storage" component={() => <ProtectedRoute component={R2Storage} />} />
-      <Route path="/settings" component={() => <ProtectedRoute component={Settings} />} />
-      <Route component={NotFound} />
-    </Switch>
+    // base="/admin" 让所有 <Route path="..."> 都相对于 /admin 匹配
+    // 例如 path="/login" 实际匹配浏览器地址 /admin/login
+    // path="/" 实际匹配 /admin 或 /admin/
+    <Router base="/admin">
+      <Switch>
+        <Route path="/login" component={LoginRoute} />
+        <Route path="/" component={() => <ProtectedRoute component={Dashboard} />} />
+        <Route path="/users" component={() => <ProtectedRoute component={Users} />} />
+        <Route path="/api-config" component={() => <ProtectedRoute component={ApiConfig} />} />
+        <Route path="/r2-storage" component={() => <ProtectedRoute component={R2Storage} />} />
+        <Route path="/settings" component={() => <ProtectedRoute component={Settings} />} />
+        <Route component={NotFound} />
+      </Switch>
+    </Router>
   );
 }
 
@@ -80,7 +89,7 @@ function App() {
       <ThemeProvider defaultTheme="dark">
         <TooltipProvider>
           <Toaster />
-          <Router />
+          <AppRouter />
         </TooltipProvider>
       </ThemeProvider>
     </ErrorBoundary>

@@ -65,12 +65,11 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
   }
 }
 
-// 管理后台默认允许的跨域来源
-// 用户端：seealso.online，管理端：admini.seealso.online
+// 单域名方案：管理後台挂载在 seealso.online/admin 下，同源请求无需 CORS
+// 保留此列表以支持未来扩展（如本地开发、预览环境等）
 const ADMIN_ALLOWED_ORIGINS = [
   "https://seealso.online",
   "https://www.seealso.online",
-  "https://admini.seealso.online",
   ...(process.env.CORS_ALLOWED_ORIGINS ?? "")
     .split(",")
     .map((s: string) => s.trim())
@@ -562,25 +561,16 @@ async function startServer() {
   });
 
   // ==================== 静态文件服务 ====================
-  // 支持 APP_MODE 环境变量：
-  //   APP_MODE=admin（默认） → 服务管理后台前端（本项目 dist/public）
-  //   APP_MODE=client           → 服务用户端前端（live-cut-test1 dist/public）
-  const appMode = process.env.APP_MODE ?? "admin";
-  let staticPath: string;
-  if (process.env.NODE_ENV === "production") {
-    staticPath = appMode === "client"
-      ? path.resolve(__dirname, "..", "client-public")
-      : path.resolve(__dirname, "public");
-  } else {
-    staticPath = appMode === "client"
-      ? path.resolve(__dirname, "..", "..", "live-cut-test1", "dist", "public")
-      : path.resolve(__dirname, "..", "dist", "public");
-  }
+  // 单域名方案：管理后台前端由 live-cut-test1 主服务在 /admin 路径下提供
+  // 此服务仅在独立开发调试时使用，生产环境不需要单独启动
+  const staticPath = process.env.NODE_ENV === "production"
+    ? path.resolve(__dirname, "public")
+    : path.resolve(__dirname, "..", "dist", "public");
 
   if (!fs.existsSync(staticPath)) {
-    console.error(`[APP_MODE=${appMode}] Static path not found: ${staticPath}`);
+    console.error(`[admin] Static path not found: ${staticPath}`);
   } else {
-    console.log(`[APP_MODE=${appMode}] Serving static files from: ${staticPath}`);
+    console.log(`[admin] Serving static files from: ${staticPath}`);
   }
 
   app.use(express.static(staticPath));
@@ -590,10 +580,8 @@ async function startServer() {
 
   const port = STARTUP_ADMIN_PORT;
   server.listen(port, () => {
-    const modeDesc = appMode === "client"
-      ? "\u7528\u6237\u7aef (seealso.online)"
-      : "\u7ba1\u7406\u540e\u53f0 (admini.seealso.online)";
-    console.log(`[APP_MODE=${appMode}] Admin server running on http://localhost:${port}/ \u2192 ${modeDesc}`);
+    console.log(`[admin] Server running on http://localhost:${port}/`);
+    console.log(`[admin] 生产环境请使用主服务 live-cut-test1，管理后台在 /admin 路径下可访`);
   });
 }
 

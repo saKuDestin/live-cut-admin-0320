@@ -154,6 +154,10 @@ const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(
 
 export default defineConfig({
   plugins,
+  // 管理后台挂载在 /admin 子路径下，base 必须设为 /admin/
+  // 这样构建产物中所有 JS/CSS 引用路径为 /admin/assets/xxx.js
+  // 与用户端 /assets/xxx.js 完全不冲突
+  base: "/admin/",
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),
