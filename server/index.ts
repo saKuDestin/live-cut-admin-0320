@@ -613,34 +613,45 @@ async function startServer() {
 
   // ==================== SPA Fallback（双路径分发）====================
   //
-  // /admin 及其子路径 → 返回 dist/admin/index.html（后台管理端 SPA）
-  // 其余所有路径      → 返回 dist/client/index.html（前台客户端 SPA）
+  // 分发规则：
+  //   /api/*        → 不处理（上方 API 路由已处理，这里不会到达）
+  //   /admin 及子路径 → dist/admin/index.html（后台管理端 SPA）
+  //   其余所有路径 → dist/client/index.html（前台客户端 SPA）
   //
   // 注意：未登录访问 /admin 时，React 路由（wouter base="/admin"）会自动跳转到 /admin/login
 
-  // 后台管理端 SPA fallback：匹配 /admin 及 /admin/*
-  app.get(['/admin', '/admin/*'], (_req, res) => {
-    const indexFile = path.join(adminStaticPath, "index.html");
-    if (fs.existsSync(indexFile)) {
-      res.sendFile(indexFile);
-    } else {
-      res.status(503).send([
-        "<!DOCTYPE html><html><head><title>Admin Not Built</title></head><body>",
-        "<h2>⚠️ Admin panel not built</h2>",
-        "<p>The admin frontend assets are missing. Please run: <code>pnpm build</code></p>",
-        `<p>Expected path: <code>${adminStaticPath}</code></p>`,
-        "<hr><h3>Render 修复步骤：</h3><ol>",
-        "<li>进入 Render Dashboard → Web Service → Settings</li>",
-        "<li><strong>Build Command</strong>：<code>pnpm install && pnpm build</code></li>",
-        "<li><strong>Start Command</strong>：<code>pnpm start</code></li>",
-        "<li>点击 Manual Deploy → Deploy latest commit</li>",
-        "</ol></body></html>",
-      ].join(""));
-    }
-  });
+  app.get("*", (req, res) => {
+    const reqPath = req.path;
 
-  // 前台客户端 SPA fallback：匹配所有其余路径
-  app.get("*", (_req, res) => {
+    // API 请求不走 SPA fallback（正常情况下上方已处理，这里仅保险）
+    if (reqPath.startsWith("/api/")) {
+      res.status(404).json({ error: "API route not found" });
+      return;
+    }
+
+    // /admin 及其子路径 → 后台管理端 SPA
+    if (reqPath === "/admin" || reqPath.startsWith("/admin/")) {
+      const indexFile = path.join(adminStaticPath, "index.html");
+      if (fs.existsSync(indexFile)) {
+        res.sendFile(indexFile);
+      } else {
+        res.status(503).send([
+          "<!DOCTYPE html><html><head><title>Admin Not Built</title></head><body>",
+          "<h2>⚠️ Admin panel not built</h2>",
+          "<p>The admin frontend assets are missing. Please run: <code>pnpm build</code></p>",
+          `<p>Expected path: <code>${adminStaticPath}</code></p>`,
+          "<hr><h3>Render 修复步骤：</h3><ol>",
+          "<li>进入 Render Dashboard → Web Service → Settings</li>",
+          "<li><strong>Build Command</strong>：<code>pnpm install && pnpm build</code></li>",
+          "<li><strong>Start Command</strong>：<code>pnpm start</code></li>",
+          "<li>点击 Manual Deploy → Deploy latest commit</li>",
+          "</ol></body></html>",
+        ].join(""));
+      }
+      return;
+    }
+
+    // 其余所有路径 → 前台客户端 SPA
     const indexFile = path.join(clientStaticPath, "index.html");
     if (fs.existsSync(indexFile)) {
       res.sendFile(indexFile);
