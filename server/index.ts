@@ -120,6 +120,51 @@ async function startServer() {
     next();
   });
 
+  // ==================== 静态文件服务（必须在所有 API 路由之前注册）====================
+  //
+  // 路径探测策略：优先用 process.cwd()（始终指向项目根），小失则逐一尝试其他候选
+  //
+  // Render 实际路径：
+  //   项目根: /opt/render/project/src
+  //   vite 构建输出: /opt/render/project/src/dist/public   (outDir = dist/public)
+  //   esbuild 输出: /opt/render/project/src/dist/index.js
+  //
+  // 候选路径说明：
+  //   [0] cwd()/dist/public          → 项目根/dist/public  ✅ 最可靠（不依赖 __dirname）
+  //   [1] __dirname/public           → dist/public         ✅ esbuild 打包后 __dirname=dist
+  //   [2] __dirname/../dist/public   → 项目根/dist/public  ✅ tsx 直运行时 __dirname=server
+  //   [3] __dirname/../../dist/public → 其他层级尝试
+  const staticCandidates = [
+    path.join(process.cwd(), "dist", "public"),          // 最可靠：cwd 始终是项目根
+    path.join(__dirname, "public"),                       // esbuild 打包后：__dirname=dist
+    path.join(__dirname, "..", "dist", "public"),        // tsx 运行：__dirname=server
+    path.join(__dirname, "..", "..", "dist", "public"), // 其他层级尝试
+  ];
+  const staticPath = staticCandidates.find(p => fs.existsSync(p)) || staticCandidates[0];
+
+  // 输出完整绝对路径，方便 Render 日志排查
+  console.log(`[DEBUG] ====== 静态文件服务启动 ======`);
+  console.log(`[DEBUG] NODE_ENV       = ${process.env.NODE_ENV}`);
+  console.log(`[DEBUG] __dirname      = ${__dirname}`);
+  console.log(`[DEBUG] process.cwd()  = ${process.cwd()}`);
+  console.log(`[DEBUG] 候选路径列表:`);
+  staticCandidates.forEach((p, i) => {
+    console.log(`[DEBUG]   [${i}] ${p}  exists=${fs.existsSync(p)}`);
+  });
+  console.log(`[DEBUG] 最终选定: ${staticPath}`);
+  console.log(`[DEBUG] index.html 存在: ${fs.existsSync(path.join(staticPath, "index.html"))}`);
+
+  if (!fs.existsSync(staticPath)) {
+    console.error(`[DEBUG] ❌ Build directory NOT found: ${staticPath}`);
+    console.error(`[DEBUG]    → Render Build Command 应为: pnpm install && pnpm build`);
+    console.error(`[DEBUG]    → Render Start Command  应为: pnpm start`);
+  } else {
+    console.log(`[DEBUG] ✅ Serving static files from: ${staticPath}`);
+  }
+
+  // 静态资源优先：必须在 API 路由之前注册，防止 /assets/*.js 被全捕获路由拦截返回 HTML
+  app.use(express.static(staticPath, { maxAge: "1d" }));
+
   // ==================== 认证接口 ====================
 
   // 管理员登录
@@ -563,61 +608,6 @@ async function startServer() {
     }
   });
 
-  // ==================== 静态文件服务 ====================
-  //
-  // 路径探测策略（多候选，取第一个存在的）：
-  //   候选1: path.join(__dirname, "public")
-  //     - esbuild 打包后 __dirname = dist/，路径 = dist/public ✅
-  //   候选2: path.join(process.cwd(), "dist", "public")
-  //     - 某些平台 cwd 是项目根，路径 = <root>/dist/public ✅
-  //   候选3: path.join(__dirname, "..", "dist", "public")
-  //     - 开发环境 __dirname = server/，路径 = <root>/dist/public ✅
-  //
-  // Render 实际路径示例：
-  //   __dirname  = /opt/render/project/src/dist
-  //   staticPath = /opt/render/project/src/dist/public
-
-  // 路径探测策略：优先用 process.cwd()（始终指向项目根），小失则逐一尝试其他候选
-  //
-  // Render 实际路径：
-  //   项目根: /opt/render/project/src
-  //   vite 构建输出: /opt/render/project/src/dist/public   (即 outDir = dist/public)
-  //   esbuild 输出: /opt/render/project/src/dist/index.js
-  //
-  // 候选路径说明：
-  //   [0] cwd()/dist/public          → 项目根/dist/public  ✅ 最可靠（不依赖 __dirname）
-  //   [1] __dirname/public           → dist/public         ✅ esbuild 打包后 __dirname=dist
-  //   [2] __dirname/../dist/public   → 项目根/dist/public  ✅ tsx 直运行时 __dirname=server
-  //   [3] __dirname/../../dist/public → 其他层级尝试
-  const staticCandidates = [
-    path.join(process.cwd(), "dist", "public"),          // 最可靠：cwd 始终是项目根
-    path.join(__dirname, "public"),                       // esbuild 打包后：__dirname=dist
-    path.join(__dirname, "..", "dist", "public"),        // tsx 运行：__dirname=server
-    path.join(__dirname, "..", "..", "dist", "public"), // 其他层级尝试
-  ];
-  const staticPath = staticCandidates.find(p => fs.existsSync(p)) || staticCandidates[0];
-
-  // 输出完整绝对路径，方便 Render 日志排查
-  console.log(`[DEBUG] ====== 静态文件服务启动 ======`);
-  console.log(`[DEBUG] NODE_ENV       = ${process.env.NODE_ENV}`);
-  console.log(`[DEBUG] __dirname      = ${__dirname}`);
-  console.log(`[DEBUG] process.cwd()  = ${process.cwd()}`);
-  console.log(`[DEBUG] 候选路径列表:`);
-  staticCandidates.forEach((p, i) => {
-    console.log(`[DEBUG]   [${i}] ${p}  exists=${fs.existsSync(p)}`);
-  });
-  console.log(`[DEBUG] 最终选定: ${staticPath}`);
-  console.log(`[DEBUG] index.html 存在: ${fs.existsSync(path.join(staticPath, "index.html"))}`);
-
-  if (!fs.existsSync(staticPath)) {
-    console.error(`[DEBUG] ❌ Build directory NOT found: ${staticPath}`);
-    console.error(`[DEBUG]    → Render Build Command 应为: pnpm install && pnpm build`);
-    console.error(`[DEBUG]    → Render Start Command  应为: pnpm start`);
-  } else {
-    console.log(`[DEBUG] ✅ Serving static files from: ${staticPath}`);
-  }
-
-  app.use(express.static(staticPath, { maxAge: "1d" }));
   app.get("*", (_req, res) => {
     const indexFile = path.join(staticPath, "index.html");
     if (fs.existsSync(indexFile)) {
