@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { adminFetch } from "@/lib/adminApi";
 
 interface ApiConfigData {
   DEEPSEEK_API_KEY: string;
@@ -111,7 +112,7 @@ export default function ApiConfig() {
   const fetchConfig = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/api-config", { credentials: "include" });
+      const res = await adminFetch("/api/admin/api-config");
       if (res.ok) setConfig(await res.json());
     } finally { setLoading(false); }
   };
@@ -119,8 +120,8 @@ export default function ApiConfig() {
   useEffect(() => { fetchConfig(); }, []);
 
   const handleSave = async (key: string, value: string) => {
-    const res = await fetch("/api/admin/api-config", {
-      method: "POST", credentials: "include",
+    const res = await adminFetch("/api/admin/api-config", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, value }),
     });

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { adminFetch } from "@/lib/adminApi";
 
 export default function Settings() {
   const { user, refresh } = useAdminAuth();
@@ -25,8 +26,8 @@ export default function Settings() {
   const saveProfile = async () => {
     setSavingProfile(true);
     try {
-      const res = await fetch(`/api/admin/users/${user?.id}`, {
-        method: "PUT", credentials: "include",
+      const res = await adminFetch(`/api/admin/users/${user?.id}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email }),
       });
@@ -43,8 +44,8 @@ export default function Settings() {
     if (newPwd !== confirmPwd) { toast.error("两次密码不一致"); return; }
     setSavingPwd(true);
     try {
-      const res = await fetch(`/api/admin/users/${user?.id}`, {
-        method: "PUT", credentials: "include",
+      const res = await adminFetch(`/api/admin/users/${user?.id}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: newPwd }),
       });

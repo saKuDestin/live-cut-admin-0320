@@ -4,6 +4,7 @@
  */
 import { useState } from "react";
 import { Scissors, Eye, EyeOff, Shield } from "lucide-react";
+import { adminFetch } from "@/lib/adminApi";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,11 +25,10 @@ export default function Login({ onSuccess }: LoginProps) {
     if (!username.trim() || !password) { setError("请输入用户名和密码"); return; }
     setError(""); setLoading(true);
     try {
-      const res = await fetch("/api/admin/login", {
+      const res = await adminFetch("/api/admin/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim(), password }),
-        credentials: "include",
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "登录失败"); return; }

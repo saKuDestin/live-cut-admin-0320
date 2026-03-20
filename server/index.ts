@@ -65,12 +65,50 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
   }
 }
 
+// 管理后台默认允许的跨域来源
+const ADMIN_ALLOWED_ORIGINS = [
+  "https://www.seealso.online",
+  "https://seealso.online",
+  "https://www.seealso.me",
+  "https://seealso.me",
+  ...(process.env.CORS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((s: string) => s.trim())
+    .filter(Boolean),
+];
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // ===== CORS 跨域配置 =====
+  // 允许 www.seealso.online（前端用户界面）和 www.seealso.me（管理后台）跨域访问
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    const allowedOrigins = [...new Set(ADMIN_ALLOWED_ORIGINS)];
+
+    if (origin && allowedOrigins.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, Cookie"
+      );
+      res.setHeader("Access-Control-Max-Age", "86400");
+      res.setHeader("Vary", "Origin");
+    }
+
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+
+    next();
+  });
 
   // 简单 cookie 解析
   app.use((req, _res, next) => {
@@ -99,7 +137,17 @@ async function startServer() {
       const valid = await bcrypt.compare(password, user.passwordHash);
       if (!valid) { res.status(401).json({ error: "用户名或密码错误" }); return; }
       const token = jwt.sign({ userId: user.id, role: user.role, name: user.name }, ADMIN_JWT_SECRET, { expiresIn: "7d" });
-      res.cookie("admin_token", token, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000, sameSite: "lax" });
+      // 跨域部署时，sameSite 必须为 "none" 并配合 secure: true，才能在跨域请求中携带 cookie
+      const isSecure = req.protocol === "https" ||
+        (Array.isArray(req.headers["x-forwarded-proto"])
+          ? req.headers["x-forwarded-proto"][0]
+          : req.headers["x-forwarded-proto"]) === "https";
+      res.cookie("admin_token", token, {
+        httpOnly: true,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+        sameSite: isSecure ? "none" : "lax",
+        secure: isSecure,
+      });
       res.json({ success: true, token, user: { id: user.id, name: user.name, username: user.username, role: user.role } });
     } catch (err) {
       console.error("[Admin Login]", err);

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Users, Briefcase, Zap, Film, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { adminFetch } from "@/lib/adminApi";
 
 interface Stats {
   userCount: number;
@@ -43,7 +44,7 @@ export default function Dashboard() {
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/stats", { credentials: "include" });
+      const res = await adminFetch("/api/admin/stats");
       if (res.ok) setStats(await res.json());
     } finally {
       setLoading(false);

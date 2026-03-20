@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { adminFetch } from "@/lib/adminApi";
 
 interface LifecycleStatus {
   configured: boolean;
@@ -57,7 +58,7 @@ export default function R2Storage() {
   const fetchLifecycleStatus = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/r2/lifecycle", { credentials: "include" });
+      const res = await adminFetch("/api/admin/r2/lifecycle");
       if (res.ok) {
         const data = await res.json();
         setLifecycleStatus(data);
@@ -84,9 +85,8 @@ export default function R2Storage() {
   const applyLifecyclePolicy = async () => {
     setApplying(true);
     try {
-      const res = await fetch("/api/admin/r2/lifecycle", {
+      const res = await adminFetch("/api/admin/r2/lifecycle", {
         method: "POST",
-        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rules: PRESET_LIFECYCLE_RULES }),
       });

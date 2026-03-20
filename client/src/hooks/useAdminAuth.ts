@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { adminFetch } from "@/lib/adminApi";
 
 export interface AdminUser {
   id: number;
@@ -14,7 +15,7 @@ export function useAdminAuth() {
 
   const fetchMe = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/me", { credentials: "include" });
+      const res = await adminFetch("/api/admin/me");
       if (res.ok) {
         const data = await res.json();
         setUser(data);
@@ -31,7 +32,7 @@ export function useAdminAuth() {
   useEffect(() => { fetchMe(); }, [fetchMe]);
 
   const logout = useCallback(async () => {
-    await fetch("/api/admin/logout", { method: "POST", credentials: "include" });
+    await adminFetch("/api/admin/logout", { method: "POST" });
     setUser(null);
   }, []);
 

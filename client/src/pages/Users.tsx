@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { adminFetch } from "@/lib/adminApi";
 
 interface UserRow {
   id: number; username: string; name: string; email?: string;
@@ -53,7 +54,7 @@ export default function Users() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/users", { credentials: "include" });
+      const res = await adminFetch("/api/admin/users");
       if (res.ok) setUsers(await res.json());
     } finally { setLoading(false); }
   };
@@ -82,8 +83,8 @@ export default function Users() {
     if (!formData.username || !formData.password) { toast.error("用户名和密码为必填项"); return; }
     setSaving(true);
     try {
-      const res = await fetch("/api/admin/users", {
-        method: "POST", credentials: "include",
+      const res = await adminFetch("/api/admin/users", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData),
       });
@@ -101,8 +102,8 @@ export default function Users() {
     try {
       const payload: any = { name: formData.name, email: formData.email, role: formData.role };
       if (formData.password) payload.password = formData.password;
-      const res = await fetch(`/api/admin/users/${editUser.id}`, {
-        method: "PUT", credentials: "include",
+      const res = await adminFetch(`/api/admin/users/${editUser.id}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -116,7 +117,7 @@ export default function Users() {
 
   const handleDelete = async () => {
     if (!deleteUser) return;
-    const res = await fetch(`/api/admin/users/${deleteUser.id}`, { method: "DELETE", credentials: "include" });
+    const res = await adminFetch(`/api/admin/users/${deleteUser.id}`, { method: "DELETE" });
     const data = await res.json();
     if (!res.ok) { toast.error(data.error || "删除失败"); return; }
     toast.success(`用户 @${deleteUser.username} 已删除`);
@@ -127,8 +128,8 @@ export default function Users() {
   const handleToggleActive = async (u: UserRow) => {
     setTogglingId(u.id);
     try {
-      const res = await fetch(`/api/admin/users/${u.id}/toggle-active`, {
-        method: "PATCH", credentials: "include",
+      const res = await adminFetch(`/api/admin/users/${u.id}/toggle-active`, {
+        method: "PATCH",
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error || "操作失败"); return; }
