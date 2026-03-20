@@ -671,11 +671,41 @@ async function startServer() {
     }
   });
 
+  // ==================== 管理员账号初始化 ====================
+  // 若数据库中不存在任何 admin 角色用户，自动创建默认管理员账号
+  // 账号：admin  密码：1622158
+  async function initDefaultAdmin() {
+    try {
+      const db = getPool();
+      const [rows] = await db.execute<mysql.RowDataPacket[]>(
+        "SELECT COUNT(*) as count FROM users WHERE role = 'admin'"
+      );
+      const adminCount = (rows[0] as any).count;
+      if (adminCount === 0) {
+        const passwordHash = await bcrypt.hash("1622158", 12);
+        const openId = `local-admin-${Date.now()}`;
+        await db.execute(
+          `INSERT INTO users (openId, username, passwordHash, name, email, role, loginMethod, isActive, createdAt, updatedAt, lastSignedIn)
+           VALUES (?, 'admin', ?, '管理员', NULL, 'admin', 'local', 1, NOW(), NOW(), NOW())`,
+          [openId, passwordHash]
+        );
+        console.log("[admin] ✅ 默认管理员账号已创建：username=admin");
+      } else {
+        console.log(`[admin] ℹ️  数据库中已存在 ${adminCount} 个管理员账号，跳过初始化`);
+      }
+    } catch (err) {
+      // 数据库连接失败时不阻塞启动（如首次部署数据库尚未就绪）
+      console.warn("[admin] ⚠️  管理员初始化跳过（数据库暂不可用）:", (err as Error).message);
+    }
+  }
+
   // 统一使用 process.env.PORT（Render 动态注入），兜底 ADMIN_PORT，最后默认 3002
   const port = parseInt(process.env.PORT || process.env.ADMIN_PORT || "3002");
-  server.listen(port, "0.0.0.0", () => {
+  server.listen(port, "0.0.0.0", async () => {
     console.log(`[admin] ✅ Server running on http://0.0.0.0:${port}/`);
     console.log(`[admin]    PORT env=${process.env.PORT}, ADMIN_PORT env=${process.env.ADMIN_PORT}`);
+    // 服务启动后执行初始化（异步，不阻塞请求处理）
+    await initDefaultAdmin();
   });
 }
 
