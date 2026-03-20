@@ -12,7 +12,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // 先保存关键的启动时参数，避免被 dotenv 覆盖
-const STARTUP_ADMIN_PORT = process.env.ADMIN_PORT || "3002";
+// Render 等平台通过 PORT 环境变量动态分配端口，必须优先读取
+const STARTUP_ADMIN_PORT = process.env.PORT || process.env.ADMIN_PORT || "3002";
 
 // 加载主项目的 .env 文件（不使用 override，只补充未设置的变量）
 const MAIN_PROJECT_ENV = path.resolve(__dirname, "../../live-cut-test1/.env");
@@ -561,27 +562,41 @@ async function startServer() {
   });
 
   // ==================== 静态文件服务 ====================
-  // 单域名方案：管理后台前端由 live-cut-test1 主服务在 /admin 路径下提供
-  // 此服务仅在独立开发调试时使用，生产环境不需要单独启动
-  const staticPath = process.env.NODE_ENV === "production"
-    ? path.resolve(__dirname, "public")
-    : path.resolve(__dirname, "..", "dist", "public");
+  // esbuild 打包后 __dirname 指向 dist/ 目录
+  // Render 部署路径：/opt/render/project/src/dist/
+  //   静态文件：/opt/render/project/src/dist/public/
+  // 开发模式：__dirname 指向 server/，需要向上一层到项目根再进入 dist/
+  const isDev = process.env.NODE_ENV !== "production";
+  const staticPath = isDev
+    ? path.resolve(__dirname, "..", "dist", "public")
+    : path.resolve(__dirname, "public");
+
+  // 输出完整绝对路径，方便 Render 日志排查
+  console.log(`[admin] NODE_ENV=${process.env.NODE_ENV}`);
+  console.log(`[admin] __dirname=${__dirname}`);
+  console.log(`[admin] staticPath=${staticPath}`);
 
   if (!fs.existsSync(staticPath)) {
     console.error(`[admin] Static path not found: ${staticPath}`);
+    console.error(`[admin] 请确认已执行构建命令: pnpm build`);
   } else {
     console.log(`[admin] Serving static files from: ${staticPath}`);
   }
 
   app.use(express.static(staticPath));
   app.get("*", (_req, res) => {
-    res.sendFile(path.join(staticPath, "index.html"));
+    const indexFile = path.join(staticPath, "index.html");
+    if (fs.existsSync(indexFile)) {
+      res.sendFile(indexFile);
+    } else {
+      res.status(503).send("Admin panel not built. Run 'pnpm build' first.");
+    }
   });
 
   const port = STARTUP_ADMIN_PORT;
   server.listen(port, () => {
     console.log(`[admin] Server running on http://localhost:${port}/`);
-    console.log(`[admin] 生产环境请使用主服务 live-cut-test1，管理后台在 /admin 路径下可访`);
+    console.log(`[admin] PORT env=${process.env.PORT}, ADMIN_PORT env=${process.env.ADMIN_PORT}`);
   });
 }
 
