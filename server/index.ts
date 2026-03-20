@@ -564,41 +564,68 @@ async function startServer() {
   });
 
   // ==================== 静态文件服务 ====================
-  // esbuild 打包后 __dirname 指向 dist/ 目录
-  // Render 部署路径：/opt/render/project/src/dist/
-  //   静态文件：/opt/render/project/src/dist/public/
-  // 开发模式：__dirname 指向 server/，需要向上一层到项目根再进入 dist/
-  const isDev = process.env.NODE_ENV !== "production";
-  const staticPath = isDev
-    ? path.resolve(__dirname, "..", "dist", "public")
-    : path.resolve(__dirname, "public");
+  //
+  // 路径探测策略（多候选，取第一个存在的）：
+  //   候选1: path.join(__dirname, "public")
+  //     - esbuild 打包后 __dirname = dist/，路径 = dist/public ✅
+  //   候选2: path.join(process.cwd(), "dist", "public")
+  //     - 某些平台 cwd 是项目根，路径 = <root>/dist/public ✅
+  //   候选3: path.join(__dirname, "..", "dist", "public")
+  //     - 开发环境 __dirname = server/，路径 = <root>/dist/public ✅
+  //
+  // Render 实际路径示例：
+  //   __dirname  = /opt/render/project/src/dist
+  //   staticPath = /opt/render/project/src/dist/public
+
+  const staticCandidates = [
+    path.join(__dirname, "public"),
+    path.join(process.cwd(), "dist", "public"),
+    path.join(__dirname, "..", "dist", "public"),
+  ];
+  const staticPath = staticCandidates.find(p => fs.existsSync(p)) || staticCandidates[0];
 
   // 输出完整绝对路径，方便 Render 日志排查
-  console.log(`[admin] NODE_ENV=${process.env.NODE_ENV}`);
-  console.log(`[admin] __dirname=${__dirname}`);
-  console.log(`[admin] staticPath=${staticPath}`);
+  console.log(`[admin] ====== 静态文件服务启动 ======`);
+  console.log(`[admin] NODE_ENV    = ${process.env.NODE_ENV}`);
+  console.log(`[admin] __dirname   = ${__dirname}`);
+  console.log(`[admin] cwd         = ${process.cwd()}`);
+  console.log(`[admin] staticPath  = ${staticPath}`);
+  console.log(`[admin] index.html  = ${fs.existsSync(path.join(staticPath, "index.html"))}`);
 
   if (!fs.existsSync(staticPath)) {
-    console.error(`[admin] Static path not found: ${staticPath}`);
-    console.error(`[admin] 请确认已执行构建命令: pnpm build`);
+    console.error(`[admin] ❌ Build directory NOT found: ${staticPath}`);
+    console.error(`[admin]    → Render Build Command 应为: pnpm install && pnpm build`);
+    console.error(`[admin]    → Render Start Command  应为: pnpm start`);
   } else {
-    console.log(`[admin] Serving static files from: ${staticPath}`);
+    console.log(`[admin] ✅ Serving static files from: ${staticPath}`);
   }
 
-  app.use(express.static(staticPath));
+  app.use(express.static(staticPath, { maxAge: "1d" }));
   app.get("*", (_req, res) => {
     const indexFile = path.join(staticPath, "index.html");
     if (fs.existsSync(indexFile)) {
       res.sendFile(indexFile);
     } else {
-      res.status(503).send("Admin panel not built. Run 'pnpm build' first.");
+      res.status(503).send([
+        "<!DOCTYPE html><html><head><title>App Not Built</title></head><body>",
+        "<h2>⚠️ Admin panel not built</h2>",
+        "<p>The frontend assets are missing. Please check your build configuration.</p>",
+        `<p>Expected path: <code>${staticPath}</code></p>`,
+        "<hr><h3>Render 修复步骤：</h3><ol>",
+        "<li>进入 Render Dashboard → Web Service → Settings</li>",
+        "<li><strong>Build Command</strong>：<code>pnpm install && pnpm build</code></li>",
+        "<li><strong>Start Command</strong>：<code>pnpm start</code></li>",
+        "<li>点击 Manual Deploy → Deploy latest commit</li>",
+        "</ol></body></html>",
+      ].join(""));
     }
   });
 
-  const port = STARTUP_ADMIN_PORT;
-  server.listen(port, () => {
-    console.log(`[admin] Server running on http://localhost:${port}/`);
-    console.log(`[admin] PORT env=${process.env.PORT}, ADMIN_PORT env=${process.env.ADMIN_PORT}`);
+  // 统一使用 process.env.PORT（Render 动态注入），兜底 ADMIN_PORT，最后默认 3002
+  const port = parseInt(process.env.PORT || process.env.ADMIN_PORT || "3002");
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`[admin] ✅ Server running on http://0.0.0.0:${port}/`);
+    console.log(`[admin]    PORT env=${process.env.PORT}, ADMIN_PORT env=${process.env.ADMIN_PORT}`);
   });
 }
 
