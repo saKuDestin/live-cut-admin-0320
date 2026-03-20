@@ -11,29 +11,41 @@ import dotenv from "dotenv";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 加载主项目的 .env 文件（在 __dirname 确定后）
+// 先保存关键的启动时参数，避免被 dotenv 覆盖
+const STARTUP_ADMIN_PORT = process.env.ADMIN_PORT || "3002";
+
+// 加载主项目的 .env 文件（不使用 override，只补充未设置的变量）
 const MAIN_PROJECT_ENV = path.resolve(__dirname, "../../live-cut-test1/.env");
 const envResult = dotenv.config({ path: MAIN_PROJECT_ENV });
 if (envResult.error) {
-  // 尝试相对 cwd 的路径
   dotenv.config({ path: path.resolve(process.cwd(), "../live-cut-test1/.env") });
 }
 
 const ADMIN_JWT_SECRET = process.env.JWT_SECRET || "admin-secret-key-2024";
-// 硬编码 fallback 确保开发环境可用
-const DB_URL = process.env.DATABASE_URL || "mysql://appuser:apppass123@localhost:3306/livestream_clipper";
 
 // 解析数据库连接 URL
 function parseDbUrl(url: string) {
   const match = url.match(/mysql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
-  if (!match) throw new Error("Invalid DATABASE_URL");
+  if (!match) throw new Error("Invalid DATABASE_URL: " + url);
   return { user: match[1], password: match[2], host: match[3], port: parseInt(match[4]), database: match[5] };
+}
+
+// 从 .env 文件中直接读取数据库配置，避免被系统环境变量干扰
+function getDbUrlFromEnvFile(): string {
+  try {
+    const envPath = path.resolve(__dirname, "../../live-cut-test1/.env");
+    const content = fs.readFileSync(envPath, "utf-8");
+    const match = content.match(/^DATABASE_URL=(.+)$/m);
+    if (match) return match[1].trim();
+  } catch {}
+  return "mysql://appuser:apppass123@localhost:3306/livestream_clipper";
 }
 
 let pool: mysql.Pool;
 function getPool() {
   if (!pool) {
-    const cfg = parseDbUrl(DB_URL);
+    const dbUrl = getDbUrlFromEnvFile();
+    const cfg = parseDbUrl(dbUrl);
     pool = mysql.createPool({ ...cfg, waitForConnections: true, connectionLimit: 10 });
   }
   return pool;
@@ -118,7 +130,7 @@ async function startServer() {
     try {
       const db = getPool();
       const [rows] = await db.execute<mysql.RowDataPacket[]>(
-        `SELECT u.id, u.username, u.name, u.email, u.role, u.loginMethod, u.createdAt, u.lastSignedIn,
+        `SELECT u.id, u.username, u.name, u.email, u.role, u.loginMethod, u.isActive, u.createdAt, u.lastSignedIn,
           (SELECT COUNT(*) FROM jobs j WHERE j.userId = u.id) as jobCount
          FROM users u ORDER BY u.createdAt DESC`
       );
@@ -173,6 +185,7 @@ async function startServer() {
       if (name !== undefined) { updates.push("name = ?"); values.push(name); }
       if (email !== undefined) { updates.push("email = ?"); values.push(email || null); }
       if (role !== undefined) { updates.push("role = ?"); values.push(role); }
+      if ((req.body as any).isActive !== undefined) { updates.push("isActive = ?"); values.push((req.body as any).isActive ? 1 : 0); }
       if (password) {
         if (password.length < 6) { res.status(400).json({ error: "密码至少 6 位" }); return; }
         const hash = await bcrypt.hash(password, 12);
@@ -189,6 +202,25 @@ async function startServer() {
     } catch (err) {
       console.error("[Update User]", err);
       res.status(500).json({ error: "更新用户失败" });
+    }
+  });
+
+  // 切换用户启用/禁用状态
+  app.patch("/api/admin/users/:id/toggle-active", authMiddleware, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { userId } = (req as any).adminUser;
+      if (parseInt(id) === userId) { res.status(400).json({ error: "不能禁用当前登录的管理员账号" }); return; }
+      const db = getPool();
+      const [rows] = await db.execute<mysql.RowDataPacket[]>("SELECT id, isActive FROM users WHERE id = ?", [parseInt(id)]);
+      if ((rows as any[]).length === 0) { res.status(404).json({ error: "用户不存在" }); return; }
+      const current = (rows as any[])[0].isActive;
+      const newStatus = current ? 0 : 1;
+      await db.execute("UPDATE users SET isActive = ?, updatedAt = NOW() WHERE id = ?", [newStatus, parseInt(id)]);
+      res.json({ success: true, isActive: newStatus === 1 });
+    } catch (err) {
+      console.error("[Toggle Active]", err);
+      res.status(500).json({ error: "操作失败" });
     }
   });
 
@@ -299,7 +331,7 @@ async function startServer() {
     res.sendFile(path.join(staticPath, "index.html"));
   });
 
-  const port = process.env.ADMIN_PORT || 3001;
+  const port = STARTUP_ADMIN_PORT;
   server.listen(port, () => {
     console.log(`[Admin] Server running on http://localhost:${port}/`);
   });
