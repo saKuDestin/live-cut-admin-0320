@@ -150,13 +150,19 @@ function vitePluginManusDebugCollector(): Plugin {
   };
 }
 
+// =============================================================================
+// 构建目标判断
+// BUILD_TARGET=admin  → 构建后台管理端，输出到 dist/admin
+// BUILD_TARGET=client → 构建前台客户端，输出到 dist/client
+// 默认（开发模式）     → 以 admin 为主入口启动 dev server
+// =============================================================================
+const BUILD_TARGET = process.env.BUILD_TARGET || "admin";
+const isAdminBuild = BUILD_TARGET === "admin";
+
 const plugins = [react(), tailwindcss(), jsxLocPlugin(), vitePluginManusRuntime(), vitePluginManusDebugCollector()];
 
 export default defineConfig({
   plugins,
-  // base 设为 "/"，构建产物中所有 JS/CSS 引用路径为 /assets/xxx.js
-  // 与 express.static("dist/public") 完全对应，避免 MIME 类型不匹配
-  base: "/",
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),
@@ -165,11 +171,22 @@ export default defineConfig({
     },
   },
   envDir: path.resolve(import.meta.dirname),
-  root: path.resolve(import.meta.dirname, "client"),
+  // 根目录：admin 构建用 client/，client 构建用 client-frontend/
+  root: isAdminBuild
+    ? path.resolve(import.meta.dirname, "client")
+    : path.resolve(import.meta.dirname, "client-frontend"),
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    // Admin 产物 → dist/admin，Client 产物 → dist/client
+    outDir: isAdminBuild
+      ? path.resolve(import.meta.dirname, "dist/admin")
+      : path.resolve(import.meta.dirname, "dist/client"),
     emptyOutDir: true,
+    // 确保资源文件放在各自子目录的 assets/ 下，不会互相覆盖
+    assetsDir: "assets",
   },
+  // Admin 构建时 base 为 /admin/，确保 JS/CSS 引用路径正确
+  // Client 构建时 base 为 /，引用根路径资源
+  base: isAdminBuild ? "/admin/" : "/",
   server: {
     port: 3000,
     strictPort: false, // Will find next available port if 3000 is busy

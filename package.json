@@ -5,7 +5,10 @@
   "license": "MIT",
   "scripts": {
     "dev": "vite --host",
-    "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build:admin": "BUILD_TARGET=admin vite build",
+    "build:client": "BUILD_TARGET=client vite build",
+    "build:server": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "build": "pnpm build:admin && pnpm build:client && pnpm build:server",
     "render-build": "pnpm install && pnpm build",
     "start": "NODE_ENV=production node dist/index.js",
     "preview": "vite preview --host",

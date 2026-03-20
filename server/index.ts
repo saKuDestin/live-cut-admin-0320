@@ -120,50 +120,53 @@ async function startServer() {
     next();
   });
 
-  // ==================== 静态文件服务（必须在所有 API 路由之前注册）====================
+  // ==================== 静态文件服务（双路径分发）====================
   //
-  // 路径探测策略：优先用 process.cwd()（始终指向项目根），小失则逐一尝试其他候选
+  // 路由策略：
+  //   /          → dist/client  （前台客户端）
+  //   /admin     → dist/admin   （后台管理端）
+  //   /api/admin → API 路由（不走静态文件）
   //
-  // Render 实际路径：
-  //   项目根: /opt/render/project/src
-  //   vite 构建输出: /opt/render/project/src/dist/public   (outDir = dist/public)
-  //   esbuild 输出: /opt/render/project/src/dist/index.js
-  //
-  // 候选路径说明：
-  //   [0] cwd()/dist/public          → 项目根/dist/public  ✅ 最可靠（不依赖 __dirname）
-  //   [1] __dirname/public           → dist/public         ✅ esbuild 打包后 __dirname=dist
-  //   [2] __dirname/../dist/public   → 项目根/dist/public  ✅ tsx 直运行时 __dirname=server
-  //   [3] __dirname/../../dist/public → 其他层级尝试
-  const staticCandidates = [
-    path.join(process.cwd(), "dist", "public"),          // 最可靠：cwd 始终是项目根
-    path.join(__dirname, "public"),                       // esbuild 打包后：__dirname=dist
-    path.join(__dirname, "..", "dist", "public"),        // tsx 运行：__dirname=server
-    path.join(__dirname, "..", "..", "dist", "public"), // 其他层级尝试
-  ];
-  const staticPath = staticCandidates.find(p => fs.existsSync(p)) || staticCandidates[0];
-
-  // 输出完整绝对路径，方便 Render 日志排查
-  console.log(`[DEBUG] ====== 静态文件服务启动 ======`);
-  console.log(`[DEBUG] NODE_ENV       = ${process.env.NODE_ENV}`);
-  console.log(`[DEBUG] __dirname      = ${__dirname}`);
-  console.log(`[DEBUG] process.cwd()  = ${process.cwd()}`);
-  console.log(`[DEBUG] 候选路径列表:`);
-  staticCandidates.forEach((p, i) => {
-    console.log(`[DEBUG]   [${i}] ${p}  exists=${fs.existsSync(p)}`);
-  });
-  console.log(`[DEBUG] 最终选定: ${staticPath}`);
-  console.log(`[DEBUG] index.html 存在: ${fs.existsSync(path.join(staticPath, "index.html"))}`);
-
-  if (!fs.existsSync(staticPath)) {
-    console.error(`[DEBUG] ❌ Build directory NOT found: ${staticPath}`);
-    console.error(`[DEBUG]    → Render Build Command 应为: pnpm install && pnpm build`);
-    console.error(`[DEBUG]    → Render Start Command  应为: pnpm start`);
-  } else {
-    console.log(`[DEBUG] ✅ Serving static files from: ${staticPath}`);
+  // 路径探测辅助函数：优先用 process.cwd()，兜底用 __dirname
+  function resolveDistPath(subDir: string): string {
+    const candidates = [
+      path.join(process.cwd(), "dist", subDir),          // 最可靠：cwd 始终是项目根
+      path.join(__dirname, subDir),                       // esbuild 打包后：__dirname=dist
+      path.join(__dirname, "..", "dist", subDir),        // tsx 运行：__dirname=server
+      path.join(__dirname, "..", "..", "dist", subDir), // 其他层级尝试
+    ];
+    return candidates.find(p => fs.existsSync(p)) || candidates[0];
   }
 
-  // 静态资源优先：必须在 API 路由之前注册，防止 /assets/*.js 被全捕获路由拦截返回 HTML
-  app.use(express.static(staticPath, { maxAge: "1d" }));
+  const adminStaticPath = resolveDistPath("admin");
+  const clientStaticPath = resolveDistPath("client");
+
+  // 输出完整绝对路径，方便 Render 日志排查
+  console.log(`[DEBUG] ====== 静态文件服务启动（双路径分发）======`);
+  console.log(`[DEBUG] NODE_ENV          = ${process.env.NODE_ENV}`);
+  console.log(`[DEBUG] __dirname         = ${__dirname}`);
+  console.log(`[DEBUG] process.cwd()     = ${process.cwd()}`);
+  console.log(`[DEBUG] adminStaticPath   = ${adminStaticPath}  exists=${fs.existsSync(adminStaticPath)}`);
+  console.log(`[DEBUG] clientStaticPath  = ${clientStaticPath}  exists=${fs.existsSync(clientStaticPath)}`);
+
+  if (!fs.existsSync(adminStaticPath)) {
+    console.error(`[DEBUG] ❌ Admin build NOT found: ${adminStaticPath}`);
+    console.error(`[DEBUG]    → Build Command 应为: pnpm install && pnpm build`);
+  } else {
+    console.log(`[DEBUG] ✅ Admin static: ${adminStaticPath}`);
+  }
+  if (!fs.existsSync(clientStaticPath)) {
+    console.error(`[DEBUG] ❌ Client build NOT found: ${clientStaticPath}`);
+  } else {
+    console.log(`[DEBUG] ✅ Client static: ${clientStaticPath}`);
+  }
+
+  // 后台管理端静态资源：/admin/assets/* 等
+  // 必须在 API 路由之前注册，防止被全捕获路由拦截
+  app.use("/admin", express.static(adminStaticPath, { maxAge: "1d" }));
+
+  // 前台客户端静态资源：/assets/* 等（根路径下）
+  app.use("/", express.static(clientStaticPath, { maxAge: "1d" }));
 
   // ==================== 认证接口 ====================
 
@@ -608,16 +611,45 @@ async function startServer() {
     }
   });
 
-  app.get("*", (_req, res) => {
-    const indexFile = path.join(staticPath, "index.html");
+  // ==================== SPA Fallback（双路径分发）====================
+  //
+  // /admin 及其子路径 → 返回 dist/admin/index.html（后台管理端 SPA）
+  // 其余所有路径      → 返回 dist/client/index.html（前台客户端 SPA）
+  //
+  // 注意：未登录访问 /admin 时，React 路由（wouter base="/admin"）会自动跳转到 /admin/login
+
+  // 后台管理端 SPA fallback：匹配 /admin 及 /admin/*
+  app.get(['/admin', '/admin/*'], (_req, res) => {
+    const indexFile = path.join(adminStaticPath, "index.html");
     if (fs.existsSync(indexFile)) {
       res.sendFile(indexFile);
     } else {
       res.status(503).send([
-        "<!DOCTYPE html><html><head><title>App Not Built</title></head><body>",
+        "<!DOCTYPE html><html><head><title>Admin Not Built</title></head><body>",
         "<h2>⚠️ Admin panel not built</h2>",
-        "<p>The frontend assets are missing. Please check your build configuration.</p>",
-        `<p>Expected path: <code>${staticPath}</code></p>`,
+        "<p>The admin frontend assets are missing. Please run: <code>pnpm build</code></p>",
+        `<p>Expected path: <code>${adminStaticPath}</code></p>`,
+        "<hr><h3>Render 修复步骤：</h3><ol>",
+        "<li>进入 Render Dashboard → Web Service → Settings</li>",
+        "<li><strong>Build Command</strong>：<code>pnpm install && pnpm build</code></li>",
+        "<li><strong>Start Command</strong>：<code>pnpm start</code></li>",
+        "<li>点击 Manual Deploy → Deploy latest commit</li>",
+        "</ol></body></html>",
+      ].join(""));
+    }
+  });
+
+  // 前台客户端 SPA fallback：匹配所有其余路径
+  app.get("*", (_req, res) => {
+    const indexFile = path.join(clientStaticPath, "index.html");
+    if (fs.existsSync(indexFile)) {
+      res.sendFile(indexFile);
+    } else {
+      res.status(503).send([
+        "<!DOCTYPE html><html><head><title>Client Not Built</title></head><body>",
+        "<h2>⚠️ Client frontend not built</h2>",
+        "<p>The client frontend assets are missing. Please run: <code>pnpm build</code></p>",
+        `<p>Expected path: <code>${clientStaticPath}</code></p>`,
         "<hr><h3>Render 修复步骤：</h3><ol>",
         "<li>进入 Render Dashboard → Web Service → Settings</li>",
         "<li><strong>Build Command</strong>：<code>pnpm install && pnpm build</code></li>",
