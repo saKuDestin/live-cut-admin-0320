@@ -334,6 +334,8 @@ async function startServer() {
     res.json({
       DEEPSEEK_API_KEY: config.DEEPSEEK_API_KEY ? masked(config.DEEPSEEK_API_KEY) : "",
       DEEPSEEK_API_KEY_SET: !!config.DEEPSEEK_API_KEY && config.DEEPSEEK_API_KEY !== "preview-key",
+      GROQ_API_KEY: config.GROQ_API_KEY ? masked(config.GROQ_API_KEY) : "",
+      GROQ_API_KEY_SET: !!config.GROQ_API_KEY,
       DATABASE_URL: config.DATABASE_URL ? config.DATABASE_URL.replace(/:([^@]+)@/, ":****@") : "",
       S3_BUCKET: config.S3_BUCKET || "",
       S3_REGION: config.S3_REGION || "",
@@ -349,7 +351,7 @@ async function startServer() {
   app.post("/api/admin/api-config", authMiddleware, async (req, res) => {
     try {
       const { key, value } = req.body as { key: string; value: string };
-      const ALLOWED_KEYS = ["DEEPSEEK_API_KEY", "S3_BUCKET", "S3_REGION", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_ENDPOINT"];
+      const ALLOWED_KEYS = ["DEEPSEEK_API_KEY", "GROQ_API_KEY", "S3_BUCKET", "S3_REGION", "S3_ACCESS_KEY", "S3_SECRET_KEY", "S3_ENDPOINT"];
       if (!ALLOWED_KEYS.includes(key)) { res.status(400).json({ error: "不允许修改该配置项" }); return; }
       const envPath = MAIN_PROJECT_ENV;
       let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, "utf-8") : "";

@@ -3,7 +3,7 @@
  * Design: 极简主义企业后台 - 分组配置卡片，内联编辑
  */
 import { useEffect, useState } from "react";
-import { Key, Database, Cloud, Save, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
+import { Key, Database, Cloud, Save, Eye, EyeOff, CheckCircle2, AlertCircle, RefreshCw, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,8 @@ import { adminFetch } from "@/lib/adminApi";
 interface ApiConfigData {
   DEEPSEEK_API_KEY: string;
   DEEPSEEK_API_KEY_SET: boolean;
+  GROQ_API_KEY: string;
+  GROQ_API_KEY_SET: boolean;
   DATABASE_URL: string;
   S3_BUCKET: string;
   S3_REGION: string;
@@ -170,6 +172,27 @@ export default function ApiConfig() {
                 type="password"
                 isSet={config?.DEEPSEEK_API_KEY_SET}
                 hint="DeepSeek API 密钥，用于 LLM 产品分段和爆款文案生成。获取地址：platform.deepseek.com"
+                onSave={handleSave}
+              />
+            </div>
+          </div>
+
+          {/* Groq 语音转录配置 */}
+          <div className="bg-card border border-border rounded-lg overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+              <Mic className="w-4 h-4 text-orange-400" />
+              <h2 className="text-sm font-medium text-foreground">Groq 语音转录配置</h2>
+              <span className="text-xs text-muted-foreground ml-auto">用于视频音频转录（Whisper-large-v3）</span>
+            </div>
+            <div className="px-4">
+              <ConfigField
+                label="GROQ_API_KEY"
+                configKey="GROQ_API_KEY"
+                value={config?.GROQ_API_KEY || ""}
+                placeholder="gsk_xxxxxxxxxxxxxxxxxxxxxxxx"
+                type="password"
+                isSet={config?.GROQ_API_KEY_SET}
+                hint="Groq Cloud API 密钥，用于 Whisper-large-v3 语音转录，支持长音频自动分片。获取地址：console.groq.com/keys"
                 onSave={handleSave}
               />
             </div>
