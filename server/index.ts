@@ -320,6 +320,199 @@ async function startServer() {
     }
   });
 
+  // ==================== R2 存储生命周期策略接口 ====================
+
+  // 读取 .env 中的 R2/S3 配置
+  function getR2ConfigFromEnv(): Record<string, string> {
+    const envPath = MAIN_PROJECT_ENV;
+    const config: Record<string, string> = {};
+    if (fs.existsSync(envPath)) {
+      const content = fs.readFileSync(envPath, "utf-8");
+      content.split("\n").forEach(line => {
+        const match = line.match(/^([A-Z_]+)=(.*)$/);
+        if (match) config[match[1]] = match[2];
+      });
+    }
+    return config;
+  }
+
+  // 辅助：XML 转义
+  function escapeXml(str: string): string {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  }
+
+  // 辅助：解析生命周期 XML
+  function parseLifecycleXml(xml: string): Array<{ id: string; prefix: string; expirationDays: number; enabled: boolean }> {
+    const rules: Array<{ id: string; prefix: string; expirationDays: number; enabled: boolean }> = [];
+    const ruleMatches = [...xml.matchAll(/<Rule>([\s\S]*?)<\/Rule>/g)];
+    for (const match of ruleMatches) {
+      const ruleXml = match[1];
+      const id = ruleXml.match(/<ID>(.*?)<\/ID>/)?.[1] || "";
+      const status = ruleXml.match(/<Status>(.*?)<\/Status>/)?.[1] || "Disabled";
+      const prefix = ruleXml.match(/<Prefix>(.*?)<\/Prefix>/)?.[1] || "";
+      const days = parseInt(ruleXml.match(/<Days>(\d+)<\/Days>/)?.[1] || "0");
+      rules.push({ id, prefix, expirationDays: days, enabled: status === "Enabled" });
+    }
+    return rules;
+  }
+
+  // 辅助：AWS Signature V4 签名（用于 R2/S3 API）
+  async function signR2Request(params: {
+    method: string; endpoint: string; bucket: string; path: string;
+    body: string; accessKey: string; secretKey: string; contentType: string;
+    region: string;
+  }): Promise<Record<string, string>> {
+    const { createHmac, createHash } = await import("crypto");
+    const { method, endpoint, bucket, path: reqPath, body, accessKey, secretKey, contentType, region } = params;
+    const endpointUrl = new URL(endpoint);
+    const host = endpointUrl.hostname;
+    const now = new Date();
+    const amzDate = now.toISOString().replace(/[:-]|\.(\d{3})/g, (m) => m === "." + m.slice(1) ? "" : "").replace(/[:-]/g, "").slice(0, 15) + "Z";
+    const isoNow = now.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    const amzDateFmt = isoNow.slice(0, 8) + "T" + isoNow.slice(8, 14) + "Z";
+    const dateStamp = isoNow.slice(0, 8);
+    const bodyHash = createHash("sha256").update(body).digest("hex");
+    const canonicalUri = `/${bucket}${reqPath.split("?")[0]}`;
+    const canonicalQueryString = reqPath.includes("?") ? reqPath.split("?")[1] : "";
+    const headerMap: Record<string, string> = { "host": host, "x-amz-date": amzDateFmt, "x-amz-content-sha256": bodyHash };
+    if (contentType) headerMap["content-type"] = contentType;
+    const sortedKeys = Object.keys(headerMap).sort();
+    const canonicalHeaders = sortedKeys.map(k => `${k}:${headerMap[k]}\n`).join("");
+    const signedHeadersStr = sortedKeys.join(";");
+    const canonicalRequest = [method, canonicalUri, canonicalQueryString, canonicalHeaders, signedHeadersStr, bodyHash].join("\n");
+    const credentialScope = `${dateStamp}/${region}/s3/aws4_request`;
+    const stringToSign = ["AWS4-HMAC-SHA256", amzDateFmt, credentialScope, createHash("sha256").update(canonicalRequest).digest("hex")].join("\n");
+    const kDate = createHmac("sha256", "AWS4" + secretKey).update(dateStamp).digest();
+    const kRegion = createHmac("sha256", kDate).update(region).digest();
+    const kService = createHmac("sha256", kRegion).update("s3").digest();
+    const kSigning = createHmac("sha256", kService).update("aws4_request").digest();
+    const signature = createHmac("sha256", kSigning).update(stringToSign).digest("hex");
+    const authHeader = `AWS4-HMAC-SHA256 Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeadersStr}, Signature=${signature}`;
+    return { ...headerMap, "Authorization": authHeader };
+  }
+
+  // GET /api/admin/r2/lifecycle - 获取当前生命周期策略
+  app.get("/api/admin/r2/lifecycle", authMiddleware, async (_req, res) => {
+    try {
+      const config = getR2ConfigFromEnv();
+      const endpoint = config.S3_ENDPOINT || "";
+      const accessKey = config.S3_ACCESS_KEY || "";
+      const secretKey = config.S3_SECRET_KEY || "";
+      const bucket = config.S3_BUCKET || "";
+      const region = config.S3_REGION || "auto";
+
+      if (!endpoint || !accessKey || !secretKey || !bucket) {
+        res.status(503).json({
+          configured: false,
+          rules: [],
+          error: "R2 配置不完整，请先在 API 配置页面设置 S3_ENDPOINT、S3_ACCESS_KEY、S3_SECRET_KEY、S3_BUCKET"
+        });
+        return;
+      }
+
+      const headers = await signR2Request({
+        method: "GET", endpoint, bucket, path: "/?lifecycle",
+        body: "", accessKey, secretKey, contentType: "", region,
+      });
+
+      const url = `${endpoint.replace(/\/+$/, "")}/${bucket}/?lifecycle`;
+      const response = await fetch(url, { method: "GET", headers: headers as any });
+
+      if (response.status === 404 || response.status === 204) {
+        res.json({ configured: true, rules: [], lastChecked: new Date().toISOString() });
+        return;
+      }
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => response.statusText);
+        // NoSuchLifecycleConfiguration 是正常的「未配置」状态
+        if (errText.includes("NoSuchLifecycleConfiguration")) {
+          res.json({ configured: true, rules: [], lastChecked: new Date().toISOString() });
+          return;
+        }
+        res.status(response.status).json({ error: `获取生命周期策略失败: ${errText}` });
+        return;
+      }
+
+      const xml = await response.text();
+      const rules = parseLifecycleXml(xml);
+      res.json({ configured: true, rules, lastChecked: new Date().toISOString() });
+    } catch (err: any) {
+      console.error("[R2 Lifecycle GET]", err);
+      res.status(500).json({ error: err.message || "获取生命周期策略失败" });
+    }
+  });
+
+  // POST /api/admin/r2/lifecycle - 设置生命周期策略
+  app.post("/api/admin/r2/lifecycle", authMiddleware, async (req, res) => {
+    try {
+      const { rules } = req.body as {
+        rules: Array<{ id: string; prefix: string; expirationDays: number; enabled: boolean; description?: string }>
+      };
+
+      if (!Array.isArray(rules) || rules.length === 0) {
+        res.status(400).json({ error: "请提供至少一条生命周期规则" });
+        return;
+      }
+
+      const config = getR2ConfigFromEnv();
+      const endpoint = config.S3_ENDPOINT || "";
+      const accessKey = config.S3_ACCESS_KEY || "";
+      const secretKey = config.S3_SECRET_KEY || "";
+      const bucket = config.S3_BUCKET || "";
+      const region = config.S3_REGION || "auto";
+
+      if (!endpoint || !accessKey || !secretKey || !bucket) {
+        res.status(503).json({
+          error: "R2 配置不完整，请先在 API 配置页面设置 S3_ENDPOINT、S3_ACCESS_KEY、S3_SECRET_KEY、S3_BUCKET"
+        });
+        return;
+      }
+
+      // 构建 S3 XML 格式的生命周期配置
+      const xmlRules = rules.map(rule => `
+  <Rule>
+    <ID>${escapeXml(rule.id)}</ID>
+    <Status>${rule.enabled ? "Enabled" : "Disabled"}</Status>
+    <Filter>
+      <Prefix>${escapeXml(rule.prefix)}</Prefix>
+    </Filter>
+    <Expiration>
+      <Days>${rule.expirationDays}</Days>
+    </Expiration>
+  </Rule>`).join("");
+
+      const xmlBody = `<?xml version="1.0" encoding="UTF-8"?>\n<LifecycleConfiguration>${xmlRules}\n</LifecycleConfiguration>`;
+
+      const headers = await signR2Request({
+        method: "PUT", endpoint, bucket, path: "/?lifecycle",
+        body: xmlBody, accessKey, secretKey, contentType: "application/xml", region,
+      });
+
+      const url = `${endpoint.replace(/\/+$/, "")}/${bucket}/?lifecycle`;
+      const response = await fetch(url, {
+        method: "PUT",
+        headers: { ...headers as any, "Content-Type": "application/xml" },
+        body: xmlBody,
+      });
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => response.statusText);
+        res.status(response.status).json({ error: `设置生命周期策略失败 (${response.status}): ${errText}` });
+        return;
+      }
+
+      console.log(`[R2 Lifecycle] 已成功为 Bucket "${bucket}" 设置 ${rules.length} 条生命周期规则`);
+      res.json({
+        success: true,
+        message: `已成功为 Bucket "${bucket}" 设置 ${rules.length} 条生命周期规则：切片视频 3 天后自动过期，原始视频 1 天后兜底清理`,
+      });
+    } catch (err: any) {
+      console.error("[R2 Lifecycle POST]", err);
+      res.status(500).json({ error: err.message || "设置生命周期策略失败" });
+    }
+  });
+
   // ==================== 静态文件服务 ====================
 
   const staticPath = process.env.NODE_ENV === "production"

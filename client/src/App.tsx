@@ -15,6 +15,7 @@ import Dashboard from "./pages/Dashboard";
 import Users from "./pages/Users";
 import ApiConfig from "./pages/ApiConfig";
 import Settings from "./pages/Settings";
+import R2Storage from "./pages/R2Storage";
 import NotFound from "./pages/NotFound";
 import { useEffect } from "react";
 
@@ -66,6 +67,7 @@ function Router() {
       <Route path="/" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route path="/users" component={() => <ProtectedRoute component={Users} />} />
       <Route path="/api-config" component={() => <ProtectedRoute component={ApiConfig} />} />
+      <Route path="/r2-storage" component={() => <ProtectedRoute component={R2Storage} />} />
       <Route path="/settings" component={() => <ProtectedRoute component={Settings} />} />
       <Route component={NotFound} />
     </Switch>

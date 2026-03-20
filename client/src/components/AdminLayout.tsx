@@ -5,7 +5,7 @@
  */
 import { Link, useLocation } from "wouter";
 import {
-  LayoutDashboard, Users, Settings, LogOut, Scissors, Key, ChevronRight
+  LayoutDashboard, Users, Settings, LogOut, Scissors, Key, ChevronRight, HardDrive
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
@@ -21,6 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/", label: "仪表盘", icon: <LayoutDashboard className="w-4 h-4" /> },
   { href: "/users", label: "用户管理", icon: <Users className="w-4 h-4" /> },
   { href: "/api-config", label: "API 配置", icon: <Key className="w-4 h-4" /> },
+  { href: "/r2-storage", label: "R2 存储管理", icon: <HardDrive className="w-4 h-4" /> },
   { href: "/settings", label: "系统设置", icon: <Settings className="w-4 h-4" /> },
 ];
 
